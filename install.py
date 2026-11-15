@@ -54,6 +54,9 @@ def python_command():
 
 
 def write_atomic(path, text):
+    # Write through a symlink (e.g. a settings.json kept in a dotfiles
+    # repository) instead of replacing the link with a regular file.
+    path = path.resolve()
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text(text, encoding="utf-8")
     os.replace(tmp, path)

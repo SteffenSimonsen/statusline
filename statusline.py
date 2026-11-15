@@ -235,7 +235,9 @@ def render(data):
 
 
 try:
-    data = json.load(sys.stdin)
+    # Read bytes so the JSON is decoded as UTF-8, not in the locale code page
+    # that Windows uses for a piped stdin.
+    data = json.load(sys.stdin.buffer)
 except Exception:
     data = {}
 
