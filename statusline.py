@@ -239,6 +239,9 @@ try:
 except Exception:
     data = {}
 
+# Windows writes to a pipe in the locale code page (e.g. cp1252), which cannot
+# encode the block characters; -E also disables PYTHONIOENCODING.
+sys.stdout.reconfigure(encoding="utf-8")
 print(render(data))
 # A spacer row between the status line and the mode indicator below it.
 # U+2800 (braille blank) looks empty but is not whitespace, so it is not trimmed.
