@@ -32,6 +32,22 @@ These are rules of thumb, not official limits. Change the `SOFT` and `HARD` cons
 
 Requires Python 3; there are no other dependencies.
 
+Run the installer with [uv](https://docs.astral.sh/uv/):
+
+```sh
+uv run https://raw.githubusercontent.com/SteffenSimonsen/statusline/main/install.py
+```
+
+or with Python alone:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/SteffenSimonsen/statusline/main/install.py | python3 -
+```
+
+It downloads `statusline.py` to `~/.claude/statusline/` and sets `statusLine` in `~/.claude/settings.json`, keeping your other settings and a backup in `settings.json.bak`. It honours `CLAUDE_CONFIG_DIR`. Run it again to update; pass `--ref <tag>` to install a specific version.
+
+### Manual install
+
 Clone the repository, then add this to `~/.claude/settings.json`, with the path to your clone:
 
 ```json

@@ -235,10 +235,15 @@ def render(data):
 
 
 try:
-    data = json.load(sys.stdin)
+    # Read bytes so the JSON is decoded as UTF-8, not in the locale code page
+    # that Windows uses for a piped stdin.
+    data = json.load(sys.stdin.buffer)
 except Exception:
     data = {}
 
+# Windows writes to a pipe in the locale code page (e.g. cp1252), which cannot
+# encode the block characters; -E also disables PYTHONIOENCODING.
+sys.stdout.reconfigure(encoding="utf-8")
 print(render(data))
 # A spacer row between the status line and the mode indicator below it.
 # U+2800 (braille blank) looks empty but is not whitespace, so it is not trimmed.
