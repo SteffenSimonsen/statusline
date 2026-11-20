@@ -4,13 +4,13 @@ A status line for [Claude Code](https://claude.com/claude-code) that shows the m
 
 ```
 Fable 5.2  █▉      ▏             95.0K / 1M  10%
-Fable 5.2  ████▎   ▏             214.0K / 1M  21%  consider /compact
+Fable 5.2 max  ████▎   ▏             214.0K / 1M  21%  consider /compact
 Fable 5.2  █▉      ▏             95.0K / 1M  10%  cache cold · next message re-sends 95.0K  │  5h 83%
 ```
 
 ## What it shows
 
-- **Model name**, in cyan.
+- **Model name**, in cyan. The effort level follows it when it is `xhigh` or `max`: those use many more tokens, which is easy to forget once one is set.
 - **A bar** for the whole context window, so it agrees with the percentage. It fills in eighths of a cell and is coloured with a gradient: green, yellow at the soft threshold and red from the hard one. A thin line on the unfilled part marks the hard threshold, so you can see how much room is left before it is time to compact.
 - **Tokens used** out of the context window size, and the percentage of the whole window.
 - **A hint** once usage passes a threshold.
@@ -26,7 +26,7 @@ A tier applies once usage passes either its share of the window or its absolute 
 | Soft (yellow) | 200K tokens or 50% of the window | `consider /compact` |
 | Hard (red) | 400K tokens or 75% of the window | `/compact now or start a new session` |
 
-These are rules of thumb, not official limits. Change the `SOFT` and `HARD` constants at the top of `statusline.py` to move them; the line on the bar follows `HARD`. `RATE_SHOW` and `RATE_HIGH` set when a rate limit appears and when it turns red.
+These are rules of thumb, not official limits. Change the `SOFT` and `HARD` constants at the top of `statusline.py` to move them; the line on the bar follows `HARD`. `RATE_SHOW` and `RATE_HIGH` set when a rate limit appears and when it turns red, and `EFFORT_SHOW` lists the effort levels that are shown.
 
 ## Install
 
