@@ -13,17 +13,10 @@ HARD = (0.75, 400_000)  # compact now, or start a new session
 
 BAR_WIDTH = 20
 
-# Rate limits are judged by pace as well as level: usage so far is projected
-# to the end of the window. A limit is yellow from RATE_WARN percent used or
-# PACE_WARN percent projected, and red from RATE_HIGH used or 100 projected.
-RATE_WARN, RATE_HIGH = 70, 90
-PACE_WARN = 85
-# No projection until this share of the window has passed; too noisy before.
-PACE_MIN_ELAPSED = 0.10
-RATE_WINDOWS = (("five_hour", "5h", 5 * 3600), ("seven_day", "7d", 7 * 86400))
-# One-cell gauge that fills from the bottom, one to eight eighths. These are
-# block elements, like the bar, so they are all drawn at the same size.
-LEVELS = "▁▂▃▄▅▆▇█"
+# A rate limit stays hidden until RATE_SHOW percent of it is used. It is
+# yellow from there and red from RATE_HIGH.
+RATE_SHOW, RATE_HIGH = 75, 90
+RATE_WINDOWS = (("five_hour", "5h"), ("seven_day", "7d"))
 
 # Prompt cache: show a countdown once it expires within this many seconds.
 # Seeing it change while idle needs "refreshInterval" on the statusLine setting.
@@ -32,9 +25,11 @@ CACHE_SOON = 10 * 60
 CYAN, GREEN, YELLOW, RED = "\033[36m", "\033[32m", "\033[33m", "\033[31m"
 GREY, RESET = "\033[90m", "\033[0m"
 
-# Gradient stops for the bars, as RGB.
+# Gradient stops for the bar, as RGB.
 G_GREEN, G_YELLOW, G_RED = (70, 200, 120), (240, 200, 60), (235, 75, 65)
-TRACK = (58, 58, 64)  # unfilled part of a bar
+TRACK = (58, 58, 64)  # unfilled part of the bar
+MARK = (160, 160, 170)  # the line on the track at the HARD threshold
+FG, BG = "\033[38;2;%d;%d;%dm", "\033[48;2;%d;%d;%dm"
 TRUECOLOR = os.environ.get("COLORTERM", "").lower() in ("truecolor", "24bit")
 
 # Left-aligned partial blocks, one to seven eighths of a cell.
@@ -65,38 +60,44 @@ def mix(a, b, t):
     return tuple(round(x + (y - x) * t) for x, y in zip(a, b))
 
 
-def gradient(pos, yellow_pos):
-    """Colour at pos (0..1 along a bar): green, yellow at yellow_pos, then red."""
-    if pos <= yellow_pos:
+def gradient(pos, yellow_pos, red_pos):
+    """Colour at pos (0..1 along the bar): green, yellow at yellow_pos, red from red_pos."""
+    if pos >= red_pos:
+        return G_RED
+    if pos < yellow_pos:
         return mix(G_GREEN, G_YELLOW, pos / yellow_pos)
-    return mix(G_YELLOW, G_RED, (pos - yellow_pos) / (1 - yellow_pos))
+    return mix(G_YELLOW, G_RED, (pos - yellow_pos) / (red_pos - yellow_pos))
 
 
-def bar(fraction, width, yellow_pos, tier_colour):
+def bar(fraction, width, yellow_pos, red_pos, tier_colour):
     """A bar filled to fraction (0..1), in eighths of a cell.
 
-    With 24-bit colour it is drawn as a gradient on a dark track; otherwise
-    in tier_colour with a dotted track.
+    A thin line on the unfilled part marks red_pos. With 24-bit colour the bar
+    is drawn as a gradient on a dark track; otherwise in tier_colour with a
+    dotted track.
     """
     eighths = min(width * 8, int(fraction * width * 8))
     eighths = max(1, eighths)  # any usage shows a sliver
     full, part = divmod(eighths, 8)
+    filled = full + (1 if part else 0)  # cells with anything in them
+    mark = round(red_pos * width)  # the cell whose left edge is at red_pos
 
     if not TRUECOLOR:
         cells = "█" * full + (EIGHTHS[part] if part else "")
-        return f"{tier_colour}{cells}{GREY}{'░' * (width - len(cells))}{RESET}"
+        track = ["░"] * (width - filled)
+        if filled <= mark < width:
+            track[mark - filled] = f"{RESET}▏{GREY}"
+        return f"{tier_colour}{cells}{GREY}{''.join(track)}{RESET}"
 
-    out = ["\033[48;2;%d;%d;%dm" % TRACK]
+    out = [BG % TRACK]
     for i in range(width):
-        if i < full:
-            char = "█"
-        elif i == full and part:
-            char = EIGHTHS[part]
+        if i < filled:
+            out.append(FG % gradient(i / width, yellow_pos, red_pos))
+            out.append("█" if i < full else EIGHTHS[part])
+        elif i == mark:
+            out.append(FG % MARK + "▏")
         else:
-            char = " "
-        if char != " ":
-            out.append("\033[38;2;%d;%d;%dm" % gradient(i / (width - 1), yellow_pos))
-        out.append(char)
+            out.append(" ")
     out.append(RESET)
     return "".join(out)
 
@@ -104,7 +105,9 @@ def bar(fraction, width, yellow_pos, tier_colour):
 def context(used, size, pct):
     """Bar, token counts, percentage and compaction hint for the context window.
 
-    The bar fills toward the HARD threshold, so a full bar means "compact now".
+    The bar spans the whole window, so it agrees with the percentage. It turns
+    yellow at the SOFT threshold and red at HARD, where a line on the track
+    shows how much room is left before "compact now".
     """
     hard = limit_of(HARD, size)
     soft = limit_of(SOFT, size)
@@ -115,7 +118,7 @@ def context(used, size, pct):
     else:
         colour, hint = GREEN, ""
     parts = [
-        bar(used / hard, BAR_WIDTH, soft / hard, colour),
+        bar(used / size, BAR_WIDTH, soft / size, hard / size, colour),
         f"{colour}{fmt(used)}{GREY} / {fmt(size, trim=True)}{RESET}",
         f"{colour}{round(pct)}%{RESET}",
     ]
@@ -145,60 +148,26 @@ def cache(info, used, size):
     return ""
 
 
-def clock(at, now):
-    """Time of day for a moment within a day of now, otherwise the weekday too."""
-    style = "%H:%M" if at - now < 86400 else "%a %H:%M"
-    return time.strftime(style, time.localtime(at))
-
-
-def gauge(pct, colour):
-    """A one-cell gauge for pct used, filling from the bottom on a dark track."""
-    eighths = min(8, round(pct / 100 * 8))
-    if pct > 0:
-        eighths = max(1, eighths)
-    if not TRUECOLOR:
-        return f"{colour}{LEVELS[eighths - 1]}{RESET}" if eighths else f"{GREY}▁{RESET}"
-    track = "\033[48;2;%d;%d;%dm" % TRACK
-    return f"{track}{colour}{LEVELS[eighths - 1] if eighths else ' '}{RESET}"
-
-
 def rate_limits(limits):
-    """Subscription rate limits, e.g. "5h ▄ 44%  7d ▁ 6%". Empty if not provided.
+    """Subscription rate limits that are nearly used up, e.g. "5h 83%".
 
-    The gauge shows how much is used. The colour shows whether the current pace
-    lasts until the reset; if it does not, the time it runs out is shown.
+    Empty while both are below RATE_SHOW. A limit whose window has already
+    reset is skipped too: the numbers only change with a response, so an old
+    warning would otherwise stay up while the session is idle.
     """
     now = time.time()
     parts = []
-    for key, label, length in RATE_WINDOWS:
+    for key, label in RATE_WINDOWS:
         window = limits.get(key) or {}
         pct = window.get("used_percentage")
         if pct is None:
             continue
+        pct = round(pct)
         resets_at = window.get("resets_at")
-
-        # Project usage to the end of the window from the pace so far.
-        projected, runs_out_at = None, None
-        if resets_at and pct > 0:
-            elapsed = length - (resets_at - now)
-            if PACE_MIN_ELAPSED * length <= elapsed <= length:
-                projected = pct * length / elapsed
-                if projected >= 100 and pct < 100:
-                    runs_out_at = now + (100 - pct) * elapsed / pct
-
-        if pct >= RATE_HIGH or runs_out_at:
-            colour = RED
-        elif pct >= RATE_WARN or (projected or 0) >= PACE_WARN:
-            colour = YELLOW
-        else:
-            colour = GREEN
-
-        text = f"{GREY}{label}{RESET} {gauge(pct, colour)} {colour}{round(pct)}%{RESET}"
-        if runs_out_at:
-            text += f"{colour} out ~{clock(runs_out_at, now)}{RESET}"
-        elif resets_at and pct >= RATE_WARN:
-            text += f"{GREY} →{clock(resets_at, now)}{RESET}"
-        parts.append(text)
+        if pct < RATE_SHOW or (resets_at and resets_at <= now):
+            continue
+        colour = RED if pct >= RATE_HIGH else YELLOW
+        parts.append(f"{GREY}{label}{RESET} {colour}{pct}%{RESET}")
     return "  ".join(parts)
 
 
