@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Claude Code status line: model, context usage, compaction hint, cache, rate limits."""
+"""Claude Code status line: model, effort, context usage, compaction hint, cache, rate limits."""
 import json
 import os
 import sys
@@ -13,6 +13,10 @@ HARD = (0.75, 400_000)  # compact now, or start a new session
 
 BAR_WIDTH = 20
 
+# Effort levels that are named after the model. They use many more tokens,
+# which is easy to forget once one is set.
+EFFORT_SHOW = ("xhigh", "max")
+
 # A rate limit stays hidden until RATE_SHOW percent of it is used. It is
 # yellow from there and red from RATE_HIGH.
 RATE_SHOW, RATE_HIGH = 75, 90
@@ -23,7 +27,7 @@ RATE_WINDOWS = (("five_hour", "5h"), ("seven_day", "7d"))
 CACHE_SOON = 10 * 60
 
 CYAN, GREEN, YELLOW, RED = "\033[36m", "\033[32m", "\033[33m", "\033[31m"
-GREY, RESET = "\033[90m", "\033[0m"
+MAGENTA, GREY, RESET = "\033[35m", "\033[90m", "\033[0m"
 
 # Gradient stops for the bar, as RGB.
 G_GREEN, G_YELLOW, G_RED = (70, 200, 120), (240, 200, 60), (235, 75, 65)
@@ -151,28 +155,20 @@ def cache(info, used, size):
 def rate_limits(limits):
     """Subscription rate limits that are nearly used up, e.g. "5h 83%".
 
-    Empty while both are below RATE_SHOW. A limit whose window has already
-    reset is skipped too: the numbers only change with a response, so an old
-    warning would otherwise stay up while the session is idle.
+    Empty while both are below RATE_SHOW percent used.
     """
-    now = time.time()
     parts = []
     for key, label in RATE_WINDOWS:
-        window = limits.get(key) or {}
-        pct = window.get("used_percentage")
-        if pct is None:
-            continue
-        pct = round(pct)
-        resets_at = window.get("resets_at")
-        if pct < RATE_SHOW or (resets_at and resets_at <= now):
-            continue
-        colour = RED if pct >= RATE_HIGH else YELLOW
-        parts.append(f"{GREY}{label}{RESET} {colour}{pct}%{RESET}")
+        pct = round((limits.get(key) or {}).get("used_percentage") or 0)
+        if pct >= RATE_SHOW:
+            colour = RED if pct >= RATE_HIGH else YELLOW
+            parts.append(f"{GREY}{label}{RESET} {colour}{pct}%{RESET}")
     return "  ".join(parts)
 
 
 def render(data):
     model = (data.get("model") or {}).get("display_name") or "Claude"
+    effort = (data.get("effort") or {}).get("level")
     ctx = data.get("context_window") or {}
     size = ctx.get("context_window_size")
     pct = ctx.get("used_percentage")
@@ -186,7 +182,10 @@ def render(data):
     if not used and pct is not None and size:
         used = size * pct / 100
 
-    parts = [f"{CYAN}{model}{RESET}"]
+    name = f"{CYAN}{model}{RESET}"
+    if effort in EFFORT_SHOW:
+        name += f" {MAGENTA}{effort}{RESET}"
+    parts = [name]
     if used and size:
         parts += context(used, size, used / size * 100 if pct is None else pct)
     elif pct is not None:
